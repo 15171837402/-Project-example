@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Video</title>
+    <link href="https://vjs.zencdn.net/7.6.6/video-js.css" rel="stylesheet" />
+    <!-- If you'd like to support IE8 (for Video.js versions prior to v7) -->
+    <script th:src="@{~/js/ckplayer.js}"></script>
+</head>
+<body>
+<h1>直播测试</h1>
+<div class="app" style="width: 1000px;height: 600px;">
+
+</div>
+<script>
+    var videoObject = {
+        container: '.app',//“#”代表容器的ID，“.”或“”代表容器的class
+        variable: 'player',//该属性必需设置，值等于下面的new chplayer()的对象
+        autoplay:true,//自动播放
+        live:true,//直播视频形式
+        video: 'rtmp://175.24.95.148/vod/test.mp4'//视频地址
+    };
+    var player=new ckplayer(videoObject);
+</script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+server:
+  port: 80
+
+spring:
+  devtools:
+    restart:
+      enabled: true
+      additional-paths:
+        src/main/java: true
+  mvc:
+    static-path-pattern: /static/**
+  thymeleaf:
+    cache: false
+  servlet:
+    multipart:
+      max-file-size: 2MB

@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>拖拽上传文件</title>
+    <link rel="stylesheet" th:href="@{~/iconfont/iconfont.css}">
+    <script src="https://cdn.bootcss.com/spark-md5/3.0.0/spark-md5.js"></script>
+    <style>
+        .app{
+            margin-top: 25px;
+            text-align: center;
+        }
+        .file-box{
+            -webkit-box-sizing: border-box;
+            -moz-box-sizing: border-box;
+            box-sizing: border-box;
+            height: 195px;
+            width: 255px;
+            user-select: none;
+            cursor: pointer;
+            padding: 50px 30px;
+            border: 1px dashed gray;
+            display: inline-block;
+        }
+        .fileupload-drag{
+
+        }
+        .file-input{
+            display: none;
+            opacity: 0;
+        }
+        .upload_icon{
+            height: 20px;
+            width: 20px;
+            font-size: 50px;
+            color: #009688;
+        }
+        .upload_icon+p{
+            color: #999;
+            margin-top: 0;
+        }
+        .prog-box{
+
+            display: none;
+            width: 50%;
+            margin: 0 auto;
+        }
+        .prog-item{
+            /*display: flex;*/
+            padding: 5px 5px 0px;
+            padding-bottom: 0;
+        }
+        .prog{
+            height: 10px;
+            width: 100%;
+            -webkit-border-radius: 5px;
+            -moz-border-radius: 5px;
+            border-radius: 5px;
+            background: #eee;
+            position: relative;
+            overflow: hidden;
+        }
+        .prog-current{
+            height: 100%;
+            width: 100%;
+            position: absolute;
+            left: 0;
+            -webkit-border-radius: 5px;
+            -moz-border-radius: 5px;
+            border-radius: 5px;
+            width: 0%;
+            background: deepskyblue;
+            -webkit-transition: 0.25s all;
+            -moz-transition: 0.25s all;
+            -ms-transition: 0.25s all;
+            -o-transition: 0.25s all;
+            transition: 0.25s all;
+        }
+        .msg-code{
+            height: 15px;
+            text-align: right;
+            font-size: 0.8em;
+        }
+    </style>
+</head>
+<body>
+<div class="app">
+    <div class="file-box">
+        <div class="fileupload-drag">
+            <span class="iconfont upload_icon">&#xe94a;</span>
+            <p>点击上传文件，或拖拽上传</p>
+        </div>
+        <input type="file" class="file-input" accept="video/*">
+    </div>
+    <div class="prog-box">
+        <p>文件解析进度</p>
+        <div class="prog-item">
+            <div class="prog msg1">
+                <div class="prog-current"></div>
+            </div>
+            <div class="msg-code"></div>
+        </div>
+        <div class="prog-item">
+            <div class="prog msg2">
+                <div class="prog-current"></div>
+            </div>
+            <div class="msg-code"></div>
+        </div>
+        <p>文件上传进度</p>
+        <div class="prog-item">
+            <div class="prog msg3">
+                <div class="prog-current"></div>
+            </div>
+            <div class="msg-code"></div>
+        </div>
+        <div class="prog-item">
+            <div class="prog msg4">
+                <div class="prog-current"></div>
+            </div>
+            <div class="msg-code"></div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    const LENGTH=1024*1024*2
+    //任务队列标识
+    let taskFree=true;
+
+    (function () {
+        //点击选择文件
+        document.querySelector(".file-box").onclick=function () {
+            document.querySelector(".file-input").click();
+        };
+        //阻止默认行为
+        stopDefault();
+        //单机选择文件
+
+        document.querySelector(".file-input").onchange=dropFileEvent;
+        // 文件拖拽结果
+        document.querySelector(".file-box").ondrop=dropFileEvent;
+        //文件选择事件监听
+        async function dropFileEvent(e) {
+            if(!taskFree){
+                alert("当前已有一个任务正在上传");
+                return false;
+            }
+            clearAllProgress();//还原进度条
+            taskFree=false;//队列繁忙
+            e=e||event;
+            e.preventDefault();
+            //获取文件
+            let files;//判断点击或拖拽获取文件列表
+            if(this instanceof HTMLInputElement){
+                files=this.files;
+            }else{
+                files=e.dataTransfer.files;
+            }
+
+            // 判断文件列表存在否
+            if(files.length<=0){
+                noSelectFile();//未选中文件
+                taskFree=true;//开放上传队列
+                return false;
+            }
+            //判断文件类型是否符合要求（未写）
+            if(!accordWithFile()){
+                taskFree=true;
+                return false;
+            }
+            //开启进度
+            document.querySelector(".prog-box").style.display="block"
+            //执行文件操作
+            let chunksObj=[];//文件队列
+            progressMs1(0,files.length);
+            for(let i=0;i<files.length;i++){
+                // console.log("file");
+                let fileChunksObj=await OperationFile(files[i]);//等待返回切片文件对象
+                let isExist=await fileExist(fileChunksObj.name,files[i])//post判断文件是否存在
+                if(isExist){//依据计算出hash值判断文件是否存在，存在则跳过文件
+                    chunksObj.push(null);//push空对象
+                    // console.log("存在")
+                    continue;//跳过上传此文件
+                }
+                chunksObj.push(fileChunksObj);//不存在，push进文件列表
+                progressMs1(i+1,files.length);//进度条++
+            }
+            // console.log("开始上传文件",chunksObj)
+            uploadFileLoadProgress(0,chunksObj.length);
+            if(!(chunksObj.length<=0)){
+                for(let i=0;i<chunksObj.length;i++){
+                    // console.log(chunksObj[i])
+                    if(chunksObj[i]==null){
+                        uploadFileLoadProgress(i+1,chunksObj.length);
+                        uploadFileLoadProgressMs2(1,1);//秒传效果
+                        continue;
+                    }
+                    let msg=await upLoadFileSync(chunksObj[i]);//上传文件
+                    uploadFileLoadProgress(i+1,chunksObj.length);
+                    console.log(msg)
+                }
+            }
+            taskFree=true;
+        }
+    })();
+
+    function fileExist(hash,file){
+        console.log(file)
+        let filename=hash+"."+file.type.substr(file.type.indexOf("/")+1);//获取文件md5+后缀完整名
+        let formData=new FormData();
+        formData.append("chunkName",filename);
+       return new Promise(function (resolve, reject) {
+            post(new Parame({
+                url:"/upload/exist",
+                parameter:formData,
+                success:function (data) {
+                    console.log(JSON.parse(data))
+                    resolve(JSON.parse(data));
+                },
+                error:function () {
+                    console.log("???错误")
+                    reject()
+                    // window.location.href="/error";//服务器端错误
+                }
+            }))
+        }).then(function (data) {
+            return data;
+        }).catch(function () {
+            return false;
+        })
+
+    }
+    //msg1进度条改变:px
+    function progressMs1(current,length) {
+        let msg = document.querySelector(".msg1");
+        msg.firstElementChild.style.width=msg.offsetWidth/length*current+"px"
+        msg.parentElement.lastElementChild.innerHTML=current+"/"+length
+    }
+    //msg2进度条改变:%
+    function progressMs2(current,length) {
+        let msg = document.querySelector(".msg2");
+        let wid=parseInt(100/length*current)+"%"
+        msg.firstElementChild.style.width=wid;
+        msg.parentElement.lastElementChild.innerHTML=wid;
+    }
+
+    function Parame(options) {
+        this.url=options.url;
+        this.parameter=options.parameter;
+        this.success=options.success;
+        this.error=options.error
+    }
+
+    //清除所有进度
+    function clearAllProgress(){
+        document.querySelector(".msg1").firstElementChild.style.width=0;
+        document.querySelector(".msg1").parentElement.lastElementChild.innerHTML="";
+        document.querySelector(".msg2").firstElementChild.style.width=0;
+        document.querySelector(".msg2").parentElement.lastElementChild.innerHTML="";
+        document.querySelector(".msg3").firstElementChild.style.width=0;
+        document.querySelector(".msg3").parentElement.lastElementChild.innerHTML="";
+        document.querySelector(".msg4").firstElementChild.style.width=0;
+        document.querySelector(".msg4").parentElement.lastElementChild.innerHTML="";
+    }
+    //文件切片计算操作
+    function OperationFile(file) {
+        return new Promise(function (resolve, reject) {
+            //    获取hash
+            let fileRead=new FileReader()
+            console.log(file)
+            let start=0;
+            let end=start+LENGTH
+            let chunks=[];
+            //切片文件
+            while (end<file.size+LENGTH){
+                chunks.push(file.slice(start,end))
+                start=end;
+                end=start+LENGTH;
+            }
+            let spark=new SparkMD5.ArrayBuffer();
+
+            let num=0;
+            fileRead.onload=function (e) {
+                spark.append(e.target.result);
+
+                if(num<chunks.length){
+                    loadFile(chunks[num++]);
+                }else{
+                    let hash=spark.end()
+                    console.log("计算完成："+hash);
+                    // document.querySelector(".msg").innerHTML=parseInt(100/chunks.length*num)+"%";
+                    // taskFree=true;
+
+                    resolve({name:hash,type:file.type,files:chunks});
+                }
+                progressMs2(num,chunks.length)
+            }
+
+            fileRead.onerror=function () {
+                console.log("出错了")
+            }
+            function loadFile(file) {
+                fileRead.readAsArrayBuffer(file);
+            }
+            loadFile(chunks[num++]);
+        })
+    }
+    async function upLoadFileSync(chunk) {
+        let errors=[];//错误队列
+        for(let i=0;i<chunk.files.length;i++){
+            let error=await uploadFile(chunk,i);//上传切片
+            if(error){
+                errors.push(error);
+            }
+            uploadFileLoadProgressMs2(i+1,chunk.files.length);
+        }
+
+        console.log("发现"+errors.length+"个错误");
+
+        // 加入重试队列errors
+        // (暂不实现)
+
+        //合并文件，并验证文件完整性
+        let formData=new FormData()
+        formData.append("fileName",chunk.name);//文件hash名
+        formData.append("size",chunk.files.length);//文件长度
+        formData.append("type",chunk.type);//文件类型
+        //合并文件
+        post(new Parame({
+            url:"upload/merge",
+            parameter:formData,
+            success:function (data) {
+                return "ok:传输完成"
+            }
+        }))
+    }
+    function uploadFile(chunk,i) {
+        return new Promise(function (resolve, reject) {
+            //检验是否存在文件切片实现断点上传
+            let formData= new FormData();
+            formData.append("chunkName",chunk.name+"_"+(i+1));
+            post(new Parame({
+                url:"/upload/exist",
+                parameter:formData,
+                success:function(msg){
+                    msg=JSON.parse(msg);
+                    if(msg){
+                        //    存在;结束
+                        console.log("存在")
+                        reject()
+                    }else{
+                        resolve(chunk);
+                    }
+                    // console.log(msg)
+                }
+            }))
+        }).then(function (fileObj) {
+            return new Promise(function (resolve, reject) {
+                let formData=new FormData();
+                formData.append("name",fileObj.name+"_"+(i+1));
+                formData.append("file",fileObj.files[i]);
+                // let url=(i+1)!=5?"/upload":"ook";//模拟第五个文件上传失败
+                post(new Parame({
+                    url:"/upload",
+                    parameter:formData,
+                    success:function (data) {
+                        resolve()
+                    },
+                    error:function () {
+                        reject(this)
+                    }
+                }))
+            })
+        }).catch(function (xhr) {
+            return xhr
+        })
+    }
+
+    //多文件上传进度
+    function uploadFileLoadProgress(current,length) {
+        let msg = document.querySelector(".msg3");
+        msg.firstElementChild.style.width=msg.offsetWidth/length*current+"px"
+        msg.parentElement.lastElementChild.innerHTML=current+"/"+length
+    }
+
+    //单文件上传进度
+    function uploadFileLoadProgressMs2(current,length) {
+        // console.log(current)
+        let msg = document.querySelector(".msg4");
+        let wid=parseInt(100/length*current)+"%"
+        msg.firstElementChild.style.width=wid;
+        msg.parentElement.lastElementChild.innerHTML=wid;
+    }
+
+    //封装XMLhttprequest请求
+    function post(option){
+
+        let xhr=new XMLHttpRequest();
+        xhr.onreadystatechange=function () {
+            if(xhr.readyState===4){
+                if(parseInt(xhr.status/100)==2){
+                    option.success(xhr.responseText);
+                }else{
+                    // alert("error");
+                    option.error()
+                }
+
+            }
+        }
+
+        xhr.open("POST",option.url,true);
+        xhr.send(option.parameter);
+        return xhr;
+    }
+    function accordWithFile() {
+        //判断文件是否符合要求
+        return true;
+    }
+    function noSelectFile() {
+        alert("未选中文件");
+    }
+    function stopDefault() {
+        document.ondragover=
+            document.ondragenter=
+                document.ondrop=
+                    document.ondragleave=def;
+
+        function def(e){
+            e.preventDefault()
+        }
+    }
+</script>
+</body>
+</html>
